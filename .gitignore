@@ -1,0 +1,7 @@
+# Eigen meterdata blijft lokaal
+*.csv
+web/data.js
+
+# Lokale instellingen
+.claude/
+.DS_Store

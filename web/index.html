@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Energie thuis</title>
+<style>
+/* Layout: één kolom van max. 1080px; kaarten alleen waar iets losstaat. Kleuren volgen de meter: blauw = net, amber = zon terug, groen = batterij. */
+:root{
+  --bg:#f5f7f6; --panel:#ffffff; --fg:#17211d; --muted:#5d6a64; --line:#dde3e0; --grid:#e8ecea; --axis:#9aa6a0;
+  --c-afname:#3a68ad; --c-terug:#d9951f; --c-bat1:#2b8f63; --c-bat2:#86cfa9; --c-rest:#c3cbc7; --c-gas:#b4573a; --c-water:#2f8fb5;
+  --ok:#2b8f63; --warn:#b97a10; --bad:#c0392b; --focus:#3a68ad;
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --font-num:ui-rounded,-apple-system,"SF Pro Rounded","Segoe UI",Roboto,sans-serif;
+  --r:10px;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#111715; --panel:#18201d; --fg:#e7eeea; --muted:#9aa8a1; --line:#2a3531; --grid:#222c28; --axis:#5f6c66;
+  --c-afname:#6f9be0; --c-terug:#f0b04a; --c-bat1:#45b884; --c-bat2:#2f6e52; --c-rest:#44504b; --c-gas:#e07b5c; --c-water:#55b6dc;
+  --ok:#45b884; --warn:#f0b04a; --bad:#ef6b5b; --focus:#6f9be0; color-scheme:dark; } }
+:root[data-theme="dark"]{
+  --bg:#111715; --panel:#18201d; --fg:#e7eeea; --muted:#9aa8a1; --line:#2a3531; --grid:#222c28; --axis:#5f6c66;
+  --c-afname:#6f9be0; --c-terug:#f0b04a; --c-bat1:#45b884; --c-bat2:#2f6e52; --c-rest:#44504b; --c-gas:#e07b5c; --c-water:#55b6dc;
+  --ok:#45b884; --warn:#f0b04a; --bad:#ef6b5b; --focus:#6f9be0; color-scheme:dark; }
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 var(--font)}
+[hidden]{display:none!important}
+.wrap{max-width:1080px;margin:0 auto;padding-block:32px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:40px}
+h1{font-size:2rem;line-height:1.15;margin:0;letter-spacing:-.01em;text-wrap:balance}
+h2{font-size:1.25rem;margin:0;text-wrap:balance}
+h3{font-size:1rem;margin:0}
+p{margin:0;max-width:70ch}
+.muted{color:var(--muted)}
+.num{font-family:var(--font-num);font-variant-numeric:tabular-nums;font-weight:600}
+.head{display:grid;gap:10px}
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.btn{font:inherit;font-size:.9rem;padding:7px 14px;border-radius:999px;border:1px solid var(--line);background:var(--panel);color:var(--fg);cursor:pointer}
+.btn:hover{border-color:var(--axis)}
+.btn:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.btn.primary{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.status{font-size:.85rem;color:var(--muted)}
+.drop{border:2px dashed var(--line);border-radius:var(--r);padding:28px 20px;text-align:center;display:grid;gap:8px;justify-items:center}
+body.dragging .drop-overlay{display:grid}
+.drop-overlay{display:none;position:fixed;inset:0;z-index:20;place-items:center;background:color-mix(in srgb,var(--bg) 85%,transparent);font-size:1.2rem;font-weight:600;border:3px dashed var(--c-afname)}
+.sec{display:grid;gap:14px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:18px;min-width:0;display:grid;gap:4px;align-content:start}
+.label{font-size:.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.big{font-family:var(--font-num);font-variant-numeric:tabular-nums;font-size:1.9rem;font-weight:600;line-height:1.15}
+.unit{font-size:.9rem;color:var(--muted);font-weight:400;margin-left:4px;font-family:var(--font)}
+.sub{font-size:.8rem;color:var(--muted)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:.82rem;color:var(--muted)}
+.sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+.chart{position:relative;min-height:240px;min-width:0}
+.chart.small{min-height:180px}
+.chart svg{display:block;overflow:visible}
+.chart text{fill:var(--muted);font:12px var(--font);font-variant-numeric:tabular-nums}
+.tip{position:absolute;top:0;pointer-events:none;background:var(--panel);border:1px solid var(--line);box-shadow:0 6px 20px rgba(0,0,0,.14);border-radius:8px;padding:8px 10px;font-size:.8rem;white-space:nowrap;z-index:3;display:grid;gap:2px}
+.tip b{font-weight:600}
+.tip span{color:var(--muted);font-variant-numeric:tabular-nums}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+select,input{font:inherit;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+.form{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+.form label{display:grid;gap:6px;font-size:.8rem;color:var(--muted);align-content:start}
+.form input{font-size:1rem;width:100%;font-variant-numeric:tabular-nums}
+.verdict p{font-size:1.15rem;line-height:1.4}
+.pill{display:inline-block;padding:2px 10px;border-radius:999px;font-size:.78rem;font-weight:600;margin-right:8px;vertical-align:2px}
+.pill.bad{background:color-mix(in srgb,var(--bad) 16%,transparent);color:var(--bad)}
+.pill.warn{background:color-mix(in srgb,var(--warn) 18%,transparent);color:var(--warn)}
+.pill.ok{background:color-mix(in srgb,var(--ok) 16%,transparent);color:var(--ok)}
+.calc{display:grid;font-variant-numeric:tabular-nums}
+.calc div{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid var(--line);padding:7px 0}
+.calc div:last-child{border-bottom:0;font-weight:600}
+details{border-top:1px solid var(--line);padding-top:16px}
+summary{cursor:pointer;font-weight:600}
+details ul{margin:10px 0 0;padding-left:1.2em;display:grid;gap:6px;max-width:75ch}
+.files{font-size:.8rem;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px}
+.files span{border:1px solid var(--line);border-radius:999px;padding:2px 10px}
+@media print{.bar,.drop{display:none}}
+</style>
+</head>
+<body>
+<div class="drop-overlay" aria-hidden="true">Laat los om de CSV's in te lezen</div>
+<main class="wrap">
+  <header class="head">
+    <h1>Energie thuis</h1>
+    <p class="muted" id="periode">Nog geen gegevens ingelezen.</p>
+    <p id="samenvatting" hidden>In <span class="num" data-j="dagen"></span> dagen nam je <span class="num" data-j="afname"></span> kWh stroom af en leverde je <span class="num" data-j="teruglevering"></span> kWh terug aan het net. Je batterij sloeg <span class="num" data-j="batterij_geladen"></span> kWh zonnestroom op en gaf daar <span class="num" data-j="batterij_ontladen"></span> kWh van terug.</p>
+    <div class="bar">
+      <button class="btn primary" id="kies" type="button">CSV's inlezen</button>
+      <button class="btn" id="wis" type="button" hidden>Ingelezen bestanden wissen</button>
+      <input type="file" id="bestand" accept=".csv,text/csv" multiple hidden>
+      <span class="status" id="status" role="status"></span>
+    </div>
+    <div class="files" id="bestanden"></div>
+  </header>
+
+  <section class="drop" id="leeg">
+    <h2>Sleep je HomeWizard-exports hierheen</h2>
+    <p class="muted">Exporteer in de HomeWizard Energy-app per meter de grafiekdata met resolutie <b>per dag</b>: P1-meter (stroom en gas), watermeter en batterij. Sleep de CSV-bestanden op deze pagina of gebruik de knop hierboven. Alles blijft op je eigen computer.</p>
+  </section>
+
+  <div id="inhoud" hidden style="display:contents">
+  <section class="tiles" aria-label="Totalen">
+    <div class="card"><div class="label">Afgenomen stroom</div><div class="big"><span data-j="afname"></span><span class="unit">kWh</span></div><div class="sub" data-p></div></div>
+    <div class="card"><div class="label">Teruggeleverd</div><div class="big"><span data-j="teruglevering"></span><span class="unit">kWh</span></div><div class="sub">Zon die je batterij niet kon opvangen</div></div>
+    <div class="card"><div class="label">Batterij</div><div class="big"><span data-j="batterij_ontladen"></span><span class="unit">kWh geleverd</span></div><div class="sub">Rendement <span data-j="rendement"></span>%, inclusief stand-by</div></div>
+    <div class="card"><div class="label">Gas</div><div class="big"><span data-j="gas_m3"></span><span class="unit">m³</span></div><div class="sub" data-p></div></div>
+    <div class="card"><div class="label">Water</div><div class="big"><span data-j="water_m3"></span><span class="unit">m³</span></div><div class="sub" data-p></div></div>
+  </section>
+
+  <section class="sec">
+    <h2>Afname en teruglevering per maand</h2>
+    <div class="legend"><span><i class="sw" style="background:var(--c-afname)"></i>Afgenomen van het net</span><span><i class="sw" style="background:var(--c-terug)"></i>Teruggeleverd aan het net (omlaag)</span></div>
+    <div class="chart" id="g-maand"></div>
+  </section>
+
+  <section class="sec">
+    <h2>Waar je zonne-overschot heen gaat</h2>
+    <p class="muted">Per maand: wat je huidige batterij opslaat, wat een tweede batterij daar nog bij had kunnen opslaan, en wat dan nog naar het net gaat.</p>
+    <div class="legend"><span><i class="sw" style="background:var(--c-bat1)"></i>Batterij 1 (gemeten)</span><span><i class="sw" style="background:var(--c-bat2)"></i>Extra voor batterij 2 (berekend)</span><span><i class="sw" style="background:var(--c-rest)"></i>Blijft teruglevering</span></div>
+    <div class="chart" id="g-overschot"></div>
+  </section>
+
+  <section class="sec">
+    <div class="row"><h2>Per dag</h2><select id="maand" aria-label="Kies een maand"></select></div>
+    <div class="legend"><span><i class="sw" style="background:var(--c-afname)"></i>Afgenomen</span><span><i class="sw" style="background:var(--c-bat1)"></i>In batterij geladen (omlaag)</span><span><i class="sw" style="background:var(--c-terug)"></i>Teruggeleverd (omlaag)</span></div>
+    <div class="chart" id="g-dag"></div>
+  </section>
+
+  <section class="two">
+    <div class="card"><h3>Gas per maand (m³)</h3><div class="chart small" id="g-gas"></div></div>
+    <div class="card"><h3>Water per maand (m³)</h3><div class="chart small" id="g-water"></div></div>
+  </section>
+
+  <section class="sec" id="batterij2">
+    <h2>Is een tweede thuisbatterij zinvol?</h2>
+    <p>Gerekend over de laatste <span class="num" data-j="dagen"></span> dagen. Op <span class="num" data-j="dagen_teruglevering"></span> dagen leverde je nog stroom terug, terwijl je batterij al vol was of niet sneller kon laden. Een tweede batterij van 2,7 kWh had daarvan <span class="num" data-j="batterij2_laden"></span> kWh kunnen opslaan en er <span class="num" data-j="batterij2_levert"></span> kWh van 's avonds en 's nachts kunnen leveren, met het rendement van je huidige batterij.</p>
+    <p class="muted">Bij een vast contract levert een batterij alleen geld op doordat je minder stroom inkoopt en minder teruglevert. Dit gaat uit van de situatie vanaf 1 januari 2027, als salderen stopt. Vul de tarieven van je eigen contract in; ze worden in deze browser onthouden.</p>
+    <form class="form" id="invoer">
+      <label for="prijs">Stroomprijs per kWh, inclusief belastingen (€)<input id="prijs" type="number" step="0.001" value="0.268" inputmode="decimal"></label>
+      <label for="terug">Netto terugleververgoeding per kWh, na terugleverkosten (€, mag negatief)<input id="terug" type="number" step="0.001" value="0.0025" inputmode="decimal"></label>
+      <label for="kosten">Prijs tweede batterij (€)<input id="kosten" type="number" step="5" value="1195" inputmode="decimal"></label>
+      <label for="jaren">Verwachte levensduur (jaar)<input id="jaren" type="number" step="1" value="10" inputmode="numeric"></label>
+    </form>
+    <div class="two">
+      <div class="card verdict">
+        <div class="label">Oordeel</div>
+        <p data-v="nee" hidden><span class="pill bad">Niet zinvol</span>De tweede batterij verdient zich niet terug binnen de levensduur die je hebt ingevuld.</p>
+        <p data-v="twijfel" hidden><span class="pill warn">Twijfelgeval</span>De tweede batterij verdient zich net terug binnen de levensduur, maar er blijft weinig over.</p>
+        <p data-v="ja" hidden><span class="pill ok">Zinvol</span>De tweede batterij verdient zich ruim terug binnen de levensduur.</p>
+        <div class="big"><span id="e-tvt">—</span><span class="unit">jaar terugverdientijd</span></div>
+      </div>
+      <div class="card">
+        <div class="label">Per jaar</div>
+        <div class="calc">
+          <div><span>Minder stroom inkopen</span><span id="e-inkoop">—</span></div>
+          <div><span>Minder terugleververgoeding</span><span id="e-gemist">—</span></div>
+          <div><span>Besparing per jaar</span><span id="e-besparing">—</span></div>
+          <div><span>Netto over de levensduur</span><span id="e-netto">—</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <details>
+    <summary>Hoe is dit berekend</summary>
+    <ul>
+      <li>Verbruik per dag is het verschil tussen twee opeenvolgende dagstanden uit de HomeWizard-export.</li>
+      <li>Daalt een meterstand (bijvoorbeeld bij een metervervanging), dan telt de nieuwe stand vanaf nul. Wat de oude meter die dag nog telde, ontbreekt.</li>
+      <li>Batterij 2 laadt per dag hooguit 2,688 kWh, en nooit meer dan je die dag teruggeleverd hebt. Hij levert met het rendement dat je huidige batterij echt haalt, en nooit meer dan je die dag van het net afnam.</li>
+      <li>Met dagcijfers is niet te zien wanneer op een dag stroom teruggaat of wordt afgenomen. Daarom is de opbrengst van batterij 2 een bovengrens.</li>
+      <li>Heb je meer dan een jaar ingelezen, dan rekent het oordeel over de laatste 365 dagen. De grafieken tonen alles.</li>
+      <li>Geen rekening gehouden met slijtage, prijsstijgingen of een dynamisch contract.</li>
+    </ul>
+  </details>
+  </div>
+</main>
+
+<script src="data.js"></script>
+<script>
+(function () {
+  'use strict';
+  const MAANDEN = ['januari','februari','maart','april','mei','juni','juli','augustus','september','oktober','november','december'];
+  const CAP2 = 2.688;
+  const store = {
+    get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } },
+    del(k) { try { localStorage.removeItem(k); } catch (e) {} }
+  };
+  const $ = (s) => document.querySelector(s);
+  const $$ = (s) => Array.from(document.querySelectorAll(s));
+  const fmt = (v, dec) => (+v).toLocaleString('nl-NL', {minimumFractionDigits: dec || 0, maximumFractionDigits: dec || 0});
+  const eur = (x) => (x < 0 ? '− ' : '') + '€ ' + fmt(Math.abs(x), 0);
+  const datum = (s) => { const p = s.split('-'); return (+p[2]) + ' ' + MAANDEN[+p[1] - 1] + ' ' + p[0]; };
+
+  // ---------- inlezen ----------
+  const series = {p1e: new Map(), bat: new Map(), gas: new Map(), water: new Map()};
+  let bestanden = [];
+
+  function detect(head) {
+    const h = head.join(',');
+    if (h.includes('Import T1 kWh')) return 'p1e';
+    if (h.includes('Total gas used')) return 'gas';
+    if (h.includes('water usage')) return 'water';
+    if (h.includes('Import kWh') && h.includes('Export kWh')) return 'bat';
+    return null;
+  }
+  function addFile(name, text) {
+    const lines = String(text).replace(/^﻿/, '').trim().split(/\r?\n/);
+    if (lines.length < 2) return null;
+    const head = lines[0].split(',').map((s) => s.trim());
+    const type = detect(head);
+    if (!type) return null;
+    for (const line of lines.slice(1)) {
+      const c = line.split(','); const o = {};
+      head.forEach((h, i) => { o[h] = (c[i] || '').trim(); });
+      if (o.time) series[type].set(o.time.slice(0, 10), o);
+    }
+    return type;
+  }
+  const NAAM = {p1e: 'Stroom', bat: 'Batterij', gas: 'Gas', water: 'Water'};
+
+  function load(list) {
+    const res = [];
+    for (const f of list) { const t = addFile(f.name, f.text); res.push({name: f.name, type: t}); }
+    return res;
+  }
+
+  // ---------- rekenen ----------
+  function deltas(map, key) {
+    const keys = [...map.keys()].sort(); const out = new Map();
+    const n = (v) => (v === '' || v === undefined) ? NaN : +v;
+    for (let i = 0; i < keys.length - 1; i++) {
+      const a = n(map.get(keys[i])[key]), b = n(map.get(keys[i + 1])[key]);
+      if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+      out.set(keys[i], b - a < 0 ? b : b - a);
+    }
+    return out;
+  }
+  function compute() {
+    const d = {
+      dal: deltas(series.p1e, 'Import T1 kWh'), normaal: deltas(series.p1e, 'Import T2 kWh'),
+      t1: deltas(series.p1e, 'Export T1 kWh'), t2: deltas(series.p1e, 'Export T2 kWh'),
+      bi: deltas(series.bat, 'Import kWh'), bo: deltas(series.bat, 'Export kWh'),
+      gas: deltas(series.gas, 'Total gas used'), water: deltas(series.water, 'water usage dl')
+    };
+    const alle = new Set(); Object.values(d).forEach((m) => m.forEach((_, k) => alle.add(k)));
+    const g = (m, k) => m.get(k) || 0;
+    const dagen = [...alle].sort().map((k) => {
+      const terug = g(d.t1, k) + g(d.t2, k);
+      return {datum: k, maand: k.slice(0, 7), afname: g(d.dal, k) + g(d.normaal, k), teruglevering: terug,
+        batterij_geladen: g(d.bi, k), batterij_ontladen: g(d.bo, k), batterij2_laden: Math.min(terug, CAP2),
+        gas_m3: g(d.gas, k), water_m3: g(d.water, k) / 10000};
+    });
+    const geladen = dagen.reduce((t, x) => t + x.batterij_geladen, 0);
+    const ontladen = dagen.reduce((t, x) => t + x.batterij_ontladen, 0);
+    const rend = geladen > 0 ? ontladen / geladen : 0.75;
+    dagen.forEach((x) => { x.batterij2_levert = Math.min(x.batterij2_laden * rend, x.afname); });
+
+    const per = new Map();
+    for (const x of dagen) {
+      if (!per.has(x.maand)) per.set(x.maand, {maand: x.maand, dagen: 0, afname: 0, teruglevering: 0, batterij_geladen: 0, batterij_ontladen: 0, batterij2_laden: 0, batterij2_levert: 0, gas_m3: 0, water_m3: 0});
+      const m = per.get(x.maand); m.dagen++;
+      ['afname','teruglevering','batterij_geladen','batterij_ontladen','batterij2_laden','batterij2_levert','gas_m3','water_m3'].forEach((k) => { m[k] += x[k]; });
+    }
+    const maanden = [...per.values()].map((m) => Object.assign(m, {rest: Math.max(0, m.teruglevering - m.batterij2_laden)}));
+
+    const laatste = dagen.slice(-365);
+    const som = (k) => laatste.reduce((t, x) => t + x[k], 0);
+    const lg = som('batterij_geladen');
+    const jaar = {
+      start: laatste.length ? laatste[0].datum : '', eind: laatste.length ? laatste[laatste.length - 1].datum : '',
+      dagen: laatste.length, afname: som('afname'), teruglevering: som('teruglevering'),
+      batterij_geladen: lg, batterij_ontladen: som('batterij_ontladen'), rendement: lg > 0 ? som('batterij_ontladen') / lg * 100 : 0,
+      batterij2_laden: som('batterij2_laden'), batterij2_levert: som('batterij2_levert'),
+      dagen_teruglevering: laatste.filter((x) => x.teruglevering > 0.5).length,
+      gas_m3: som('gas_m3'), water_m3: som('water_m3'),
+      heeftBatterij: series.bat.size > 1
+    };
+    return {dagen, maanden, jaar};
+  }
+
+  // ---------- grafiek ----------
+  const NS = 'http://www.w3.org/2000/svg';
+  function el(tag, attrs, parent) { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+  function niceTicks(lo, hi, n) {
+    const span = hi - lo || 1; const raw = span / n; const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    const step = [1, 2, 2.5, 5, 10].map((s) => s * mag).find((s) => span / s <= n) || 10 * mag;
+    const a = Math.floor(lo / step) * step, b = Math.ceil(hi / step) * step; const t = [];
+    for (let v = a; v <= b + step / 2; v += step) t.push(Math.round(v / step) * step);
+    return t;
+  }
+  function bars(box, rows, o) {
+    box.replaceChildren();
+    if (!rows.length) { box.textContent = 'Geen gegevens voor deze periode.'; return; }
+    const W = Math.max(260, box.clientWidth), H = o.height || 240, dec = o.dec ?? 1;
+    const stacks = rows.map((r, i) => { let pos = 0, neg = 0; return o.series.map((s) => { const v = (r[s.key] || 0) * (s.sign || 1); const y0 = v >= 0 ? pos : neg; if (v >= 0) pos += v; else neg += v; return {s, i, y0, y1: v >= 0 ? pos : neg}; }); });
+    const all = stacks.flat();
+    const ticks = niceTicks(Math.min(0, ...all.map((d) => d.y1)), Math.max(0, ...all.map((d) => d.y1)), 5);
+    const lo = ticks[0], hi = ticks[ticks.length - 1];
+    const svg = el('svg', {width: W, height: H, role: 'img', 'aria-label': o.label}, box);
+    let wl = 0; const probe = el('g', {}, svg);
+    ticks.forEach((t) => { const tx = el('text', {}, probe); tx.textContent = fmt(Math.abs(t), 0); wl = Math.max(wl, tx.getComputedTextLength()); });
+    probe.remove();
+    const m = {t: 8, r: 4, b: 24, l: Math.ceil(wl) + 10};
+    const y = (v) => m.t + (hi - v) / (hi - lo || 1) * (H - m.t - m.b);
+    const stepX = (W - m.l - m.r) / rows.length, bw = stepX * (rows.length > 20 ? 0.8 : 0.7), off = (stepX - bw) / 2;
+    const x = (i) => m.l + i * stepX + off;
+    ticks.forEach((t) => {
+      el('line', {x1: m.l, x2: W - m.r, y1: y(t), y2: y(t), stroke: 'var(--grid)'}, svg);
+      const tx = el('text', {x: m.l - 6, y: y(t), dy: '0.32em', 'text-anchor': 'end'}, svg); tx.textContent = fmt(Math.abs(t), 0);
+    });
+    const hl = el('rect', {y: m.t, height: H - m.t - m.b, width: stepX, fill: 'var(--grid)', opacity: 0}, svg);
+    all.forEach((d) => { const h = Math.abs(y(d.y0) - y(d.y1)); if (h > 0) el('rect', {x: x(d.i), width: bw, y: y(Math.max(d.y0, d.y1)), height: h, fill: d.s.color, rx: Math.min(2, bw / 4)}, svg); });
+    el('line', {x1: m.l, x2: W - m.r, y1: y(0), y2: y(0), stroke: 'var(--axis)'}, svg);
+    const every = Math.max(1, Math.ceil(rows.length * (o.labelWidth || 30) / (W - m.l - m.r)));
+    rows.forEach((r, i) => { if (i % every) return; const tx = el('text', {x: x(i) + bw / 2, y: H - 6, 'text-anchor': 'middle'}, svg); tx.textContent = o.xLabel(r); });
+    const tip = document.createElement('div'); tip.className = 'tip'; tip.hidden = true; box.appendChild(tip);
+    rows.forEach((r, i) => {
+      const hit = el('rect', {x: m.l + i * stepX, width: stepX, y: m.t, height: H - m.t - m.b, fill: 'transparent'}, svg);
+      hit.addEventListener('pointerenter', () => {
+        hl.setAttribute('x', m.l + i * stepX); hl.setAttribute('opacity', 0.6);
+        const b = document.createElement('b'); b.textContent = o.tipTitle(r);
+        tip.replaceChildren(b, ...o.series.map((s) => { const sp = document.createElement('span'); const sw = document.createElement('i'); sw.className = 'sw'; sw.style.background = s.color; sp.append(sw, s.label + ': ' + fmt(r[s.key] || 0, dec) + ' ' + o.unit); return sp; }));
+        tip.hidden = false;
+        const tw = tip.offsetWidth, cx = x(i) + bw / 2;
+        tip.style.left = Math.max(0, Math.min(W - tw, cx + 12 + tw > W ? cx - tw - 12 : cx + 12)) + 'px';
+        tip.style.top = (m.t + 4) + 'px';
+      });
+      hit.addEventListener('pointerleave', () => { tip.hidden = true; hl.setAttribute('opacity', 0); });
+    });
+  }
+
+  // ---------- tonen ----------
+  let data = null;
+  const mLabel = (r) => MAANDEN[+r.maand.slice(5, 7) - 1].slice(0, 3);
+  const mTitel = (r) => MAANDEN[+r.maand.slice(5, 7) - 1] + ' ' + r.maand.slice(0, 4) + (r.dagen < 28 ? ' (' + r.dagen + ' dagen)' : '');
+
+  function drawCharts() {
+    if (!data) return;
+    const M = data.maanden;
+    bars($('#g-maand'), M, {label: 'Afgenomen en teruggeleverde stroom per maand in kWh', unit: 'kWh', dec: 0, height: 260,
+      series: [{key: 'afname', label: 'Afgenomen', color: 'var(--c-afname)'}, {key: 'teruglevering', label: 'Teruggeleverd', color: 'var(--c-terug)', sign: -1}], xLabel: mLabel, tipTitle: mTitel});
+    bars($('#g-overschot'), M, {label: 'Zonne-overschot per maand: batterij 1, extra voor batterij 2 en resterende teruglevering, in kWh', unit: 'kWh', dec: 0,
+      series: [{key: 'batterij_geladen', label: 'Batterij 1', color: 'var(--c-bat1)'}, {key: 'batterij2_laden', label: 'Extra batterij 2', color: 'var(--c-bat2)'}, {key: 'rest', label: 'Blijft teruglevering', color: 'var(--c-rest)'}], xLabel: mLabel, tipTitle: mTitel});
+    const sel = $('#maand');
+    const rows = data.dagen.filter((r) => r.maand === sel.value);
+    bars($('#g-dag'), rows, {label: 'Afgenomen stroom, batterijlading en teruglevering per dag in kWh', unit: 'kWh', dec: 1, labelWidth: 22,
+      series: [{key: 'afname', label: 'Afgenomen', color: 'var(--c-afname)'}, {key: 'batterij_geladen', label: 'In batterij', color: 'var(--c-bat1)', sign: -1}, {key: 'teruglevering', label: 'Teruggeleverd', color: 'var(--c-terug)', sign: -1}],
+      xLabel: (r) => String(+r.datum.slice(8, 10)), tipTitle: (r) => datum(r.datum)});
+    bars($('#g-gas'), M, {label: 'Gasverbruik per maand in m³', unit: 'm³', dec: 0, height: 180, labelWidth: 34, series: [{key: 'gas_m3', label: 'Gas', color: 'var(--c-gas)'}], xLabel: mLabel, tipTitle: mTitel});
+    bars($('#g-water'), M, {label: 'Waterverbruik per maand in m³', unit: 'm³', dec: 1, height: 180, labelWidth: 34, series: [{key: 'water_m3', label: 'Water', color: 'var(--c-water)'}], xLabel: mLabel, tipTitle: mTitel});
+  }
+
+  function drawEuro() {
+    if (!data) return;
+    const j = data.jaar;
+    const v = (id) => { const x = parseFloat(String($('#' + id).value).replace(',', '.')); return Number.isFinite(x) ? x : NaN; };
+    const p = v('prijs'), t = v('terug'), k = v('kosten'), l = v('jaren');
+    store.set('hw-invoer-v2', {prijs: $('#prijs').value, terug: $('#terug').value, kosten: $('#kosten').value, jaren: $('#jaren').value});
+    const ok = [p, t, k, l].every(Number.isFinite) && j.heeftBatterij;
+    const schaal = j.dagen > 0 ? 365 / j.dagen : 1;
+    const inkoop = j.batterij2_levert * schaal * p, gemist = j.batterij2_laden * schaal * t, besparing = inkoop - gemist;
+    const tvt = besparing > 0 ? k / besparing : Infinity;
+    $('#e-inkoop').textContent = ok ? eur(inkoop) : '—';
+    $('#e-gemist').textContent = ok ? eur(-gemist) : '—';
+    $('#e-besparing').textContent = ok ? eur(besparing) : '—';
+    $('#e-netto').textContent = ok ? eur(besparing * l - k) : '—';
+    $('#e-tvt').textContent = !ok ? '—' : Number.isFinite(tvt) ? fmt(tvt, 1) : 'nooit';
+    const keuze = !ok ? '' : tvt <= l * 0.6 ? 'ja' : tvt <= l ? 'twijfel' : 'nee';
+    $$('[data-v]').forEach((e) => { e.hidden = e.dataset.v !== keuze; });
+  }
+
+  function render() {
+    data = compute();
+    const has = data.dagen.length > 0;
+    $('#leeg').hidden = has; $('#inhoud').hidden = !has; $('#samenvatting').hidden = !has;
+    const chips = Object.keys(series).filter((k) => series[k].size).map((k) => { const ks = [...series[k].keys()].sort(); const s = document.createElement('span'); s.textContent = NAAM[k] + ': ' + datum(ks[0]) + ' – ' + datum(ks[ks.length - 1]); return s; });
+    $('#bestanden').replaceChildren(...chips);
+    if (!has) { $('#periode').textContent = 'Nog geen gegevens ingelezen.'; return; }
+    const j = data.jaar;
+    const eerste = data.dagen[0].datum, laatst = data.dagen[data.dagen.length - 1].datum;
+    $('#periode').textContent = 'Dagstanden van ' + datum(eerste) + ' tot en met ' + datum(laatst) + (data.dagen.length > 365 ? '. Totalen en oordeel over de laatste 365 dagen.' : '.');
+    $$('[data-j]').forEach((e) => { const v = j[e.dataset.j]; e.textContent = typeof v === 'number' ? fmt(v, 0) : '—'; });
+    $$('[data-p]').forEach((e) => { e.textContent = datum(j.start) + ' – ' + datum(j.eind); });
+    const sel = $('#maand'); const prev = sel.value;
+    sel.replaceChildren(...data.maanden.map((r) => new Option(mTitel(r), r.maand)));
+    sel.value = data.maanden.some((r) => r.maand === prev) ? prev : data.maanden[data.maanden.length - 1].maand;
+    drawCharts(); drawEuro();
+  }
+
+  // ---------- bediening ----------
+  const status = (t) => { $('#status').textContent = t; };
+  async function readFiles(fileList) {
+    const files = [...fileList].filter((f) => /\.csv$/i.test(f.name) || f.type === 'text/csv');
+    if (!files.length) { status('Geen CSV-bestanden gevonden. Exporteer de grafiekdata uit de HomeWizard Energy-app.'); return; }
+    const list = await Promise.all(files.map((f) => f.text().then((text) => ({name: f.name, text}))));
+    const res = load(list);
+    const goed = res.filter((r) => r.type), fout = res.filter((r) => !r.type);
+    bestanden = bestanden.concat(list.filter((f, i) => res[i].type));
+    const saved = store.set('hw-bestanden', bestanden);
+    status((goed.length ? goed.length + ' bestand(en) ingelezen' + (saved ? ' en onthouden in deze browser.' : '. Ze worden niet onthouden; lees ze de volgende keer opnieuw in.') : '') +
+      (fout.length ? ' Niet herkend: ' + fout.map((r) => r.name).join(', ') + '.' : ''));
+    $('#wis').hidden = !bestanden.length;
+    render();
+  }
+
+  $('#kies').addEventListener('click', () => $('#bestand').click());
+  $('#bestand').addEventListener('change', (e) => { readFiles(e.target.files); e.target.value = ''; });
+  $('#wis').addEventListener('click', () => {
+    store.del('hw-bestanden'); bestanden = [];
+    Object.values(series).forEach((m) => m.clear());
+    if (Array.isArray(window.HW_DATA)) load(window.HW_DATA);
+    $('#wis').hidden = true; status('Ingelezen bestanden gewist.'); render();
+  });
+  let dragDepth = 0;
+  window.addEventListener('dragenter', (e) => { e.preventDefault(); dragDepth++; document.body.classList.add('dragging'); });
+  window.addEventListener('dragleave', () => { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) document.body.classList.remove('dragging'); });
+  window.addEventListener('dragover', (e) => e.preventDefault());
+  window.addEventListener('drop', (e) => { e.preventDefault(); dragDepth = 0; document.body.classList.remove('dragging'); if (e.dataTransfer && e.dataTransfer.files.length) readFiles(e.dataTransfer.files); });
+  $('#maand').addEventListener('change', drawCharts);
+  $('#invoer').addEventListener('submit', (e) => e.preventDefault());
+  $$('#invoer input').forEach((i) => i.addEventListener('input', drawEuro));
+  let rt; new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(drawCharts, 80); }).observe($('main'));
+
+  // ---------- start ----------
+  const inv = store.get('hw-invoer-v2');
+  if (inv) Object.keys(inv).forEach((k) => { if ($('#' + k)) $('#' + k).value = inv[k]; });
+  if (Array.isArray(window.HW_DATA)) load(window.HW_DATA);
+  bestanden = store.get('hw-bestanden') || [];
+  if (bestanden.length) { load(bestanden); $('#wis').hidden = false; }
+  render();
+})();
+</script>
+</body>
+</html>
